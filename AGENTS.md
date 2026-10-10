@@ -78,19 +78,23 @@ Bundle IDs        org.tobywu.pelu / org.tobywu.pelu.widget / org.tobywu.pelu.mac
 
 ## 6. 發版
 
-**目前線上**：PeluMac `1.0.11`（build 12，2026-10-09），下一版 build ≥ 13；iOS `1.1`（build 3，READY_FOR_SALE）；`1.2`（build 4，Cursor 用量、卡片 bars / rings）2026-10-11 已上傳、尚未送審，下一版 build ≥ 5。iOS 走 Xcode Archive → App Store Connect。
+**目前線上**：PeluMac `1.0.11`（build 12，2026-10-09），下一版 build ≥ 13；iOS `1.1`（build 3，READY_FOR_SALE）；`1.2`（build 4，Cursor 用量、卡片 bars / rings）2026-10-11 已送審（WAITING_FOR_REVIEW，核准後自動上架），下一版 build ≥ 5。iOS 走 Xcode Archive → App Store Connect。
 
 iOS 版號用命令列帶入（`MARKETING_VERSION=… CURRENT_PROJECT_VERSION=…`），pbxproj 不動。`xcodebuild archive` / `-exportArchive`（ExportOptions `method=app-store-connect`、`destination=upload`）都加 `-allowProvisioningUpdates`，但**不要帶 `-authenticationKey*`**：那把 API key 沒有 cloud-managed distribution certificate 權限，會匯出失敗；不帶就改用 Xcode 裡登入的帳號雲端簽章，可以直接上傳。build、archive 路徑放在 iCloud 外。
 
-App Store Connect 狀態（唯讀：app、版本、最近 build）：
+App Store Connect 狀態（唯讀：app、版本、最近 build）與送審：
 
 ```sh
 python3 scripts/appstore-status.py   # 需要 python3 -m pip install cryptography
+python3 scripts/appstore-submit.py <version> <build> --notes-file <whats-new.txt>            # 建立版本（核准後自動發布）、寫入各語系「此版本新功能」、選 build
+python3 scripts/appstore-submit.py <version> <build> --notes-file <whats-new.txt> --submit   # 同上並送審
 ```
+
+build 上傳且處理成 `VALID` 後再跑 submit。共用的 JWT / API client 在 `scripts/appstoreconnect.py`。
 
 - 設定在 repo 根目錄 `.appstoreconnect.local.json`（`key_id`、`issuer_id`、`bundle_id`、`private_key_path`），私鑰在 `.secrets/AuthKey_*.p8`。兩者已被 gitignore，靠 iCloud Drive 在各台 Mac 間同步；新 Mac 要等 iCloud 下載完檔案。
 - `private_key_path` 相對於設定檔所在目錄，不依賴特定使用者帳號路徑。
-- agent 可以直接執行腳本，但**絕對不要印出、複製或提交私鑰與設定檔內容**。腳本目前只讀取，要加寫入 API（上傳 metadata、送審等）前先問使用者。
+- agent 可以直接執行腳本，但**絕對不要印出、複製或提交私鑰與設定檔內容**。`appstore-status.py` 只讀；`appstore-submit.py` 會寫入，帶 `--submit` 送審前要先得到使用者同意。要再加其他寫入 API（截圖、描述、價格等）前先問使用者。
 
 PeluMac：
 

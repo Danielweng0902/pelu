@@ -19,3 +19,4 @@ xcuserdata/
 *.certSigningRequest
 *.provisionprofile
 *.mobileprovision
+__pycache__/
