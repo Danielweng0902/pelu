@@ -37,9 +37,30 @@ public struct ClaudeUsageAPIParser: Sendable {
         ).effective(at: generatedAt)
     }
 
-    /// Prefer whichever official reading is newer. The API has no session
-    /// context or cost, so those stay from the hook when it has them.
-    public static func merge(api: UsageMetric?, hook: UsageMetric) -> UsageMetric {
+    /// Prefer whichever reading is newer. The API and the Claude app have no
+    /// session context or cost, so those stay from the hook when it has them.
+    public static func merge(api: UsageMetric?, hook: UsageMetric, desktop: UsageMetric? = nil) -> UsageMetric {
+        let official = mergeOfficial(api: api, hook: hook)
+        guard let desktop, desktop.usedPercent != nil || desktop.weeklyPercent != nil,
+              let desktopAt = desktop.measuredAt else { return official }
+        if official.usedPercent != nil || official.weeklyPercent != nil,
+           let officialAt = official.measuredAt, officialAt >= desktopAt {
+            return official
+        }
+        return UsageMetric(
+            provider: .claudeCode,
+            usedPercent: desktop.usedPercent,
+            weeklyPercent: desktop.weeklyPercent,
+            primaryWindowDurationMins: desktop.primaryWindowDurationMins,
+            secondaryWindowDurationMins: desktop.secondaryWindowDurationMins,
+            contextWindowPercent: hook.contextWindowPercent,
+            costTodayUSD: hook.costTodayUSD,
+            dataSource: desktop.dataSource,
+            measuredAt: desktopAt
+        )
+    }
+
+    private static func mergeOfficial(api: UsageMetric?, hook: UsageMetric) -> UsageMetric {
         guard let api, api.usedPercent != nil || api.weeklyPercent != nil else { return hook }
         if hook.usedPercent != nil, let hookAt = hook.measuredAt, let apiAt = api.measuredAt, hookAt > apiAt {
             return hook
@@ -94,6 +115,16 @@ public struct ClaudeUsageAPIParser: Sendable {
 public final class ClaudeUsageAPIClient: @unchecked Sendable {
     public typealias UpdateHandler = @Sendable () -> Void
 
+    public enum CredentialState: Sendable {
+        case unknown
+        case valid
+        /// Only Claude Code refreshes it, so using just the Claude app
+        /// leaves it expired.
+        case expired
+        case missing
+        case denied
+    }
+
     private static let endpoint = URL(string: "https://api.anthropic.com/api/oauth/usage")!
     private static let keychainService = "Claude Code-credentials"
     /// Minimum spacing while transcripts show new Claude activity.
@@ -122,8 +153,13 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
     /// Behind a lock rather than `queue` so readers never wait on a prompt.
     private let latestLock = NSLock()
     private var latest: (data: Data, fetchedAt: Date)?
+    private var _credentialState = CredentialState.unknown
 
     public var onUpdate: UpdateHandler?
+
+    public var credentialState: CredentialState {
+        latestLock.withLock { _credentialState }
+    }
 
     public init(clientVersion: String) {
         userAgent = "Pelu/\(clientVersion)"
@@ -228,8 +264,20 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
         let now = Date()
         if let token, token.expiresAt.map({ $0 > now }) ?? true { return token.value }
         token = readCredentials()
-        guard let token, token.expiresAt.map({ $0 > now }) ?? true else { return nil }
+        guard let token else {
+            setCredentialState(keychainDenied ? .denied : .missing)
+            return nil
+        }
+        guard token.expiresAt.map({ $0 > now }) ?? true else {
+            setCredentialState(.expired)
+            return nil
+        }
+        setCredentialState(.valid)
         return token.value
+    }
+
+    private func setCredentialState(_ state: CredentialState) {
+        latestLock.withLock { _credentialState = state }
     }
 
     private func readCredentials() -> (value: String, expiresAt: Date?)? {

@@ -54,6 +54,62 @@ private let usageResponse = """
     #expect(ClaudeUsageAPIParser.merge(api: nil, hook: staleHook).usedPercent == 5)
 }
 
+private let desktopHistory = """
+{"version": 2, "samples": [
+  {"t": 1791420000000, "org": "a", "u": {"fh": 4, "sd": 1}},
+  {"t": 1791449600000, "org": "a", "u": {"fh": 10, "sd": 2}},
+  {"t": 1791449700000, "org": "a", "u": {}}
+]}
+""".data(using: .utf8)!
+
+@Test func claudeDesktopUsageUsesLatestSampleWithUsage() throws {
+    let sampledAt = Date(timeIntervalSince1970: 1791449600)
+    let metric = try #require(ClaudeDesktopUsageParser().parse(data: desktopHistory, now: sampledAt.addingTimeInterval(600)))
+
+    #expect(metric.usedPercent == 10)
+    #expect(metric.weeklyPercent == 2)
+    #expect(metric.measuredAt == sampledAt)
+    #expect(metric.resetDate == nil)
+    #expect(metric.resolvedPrimaryWindowDurationMins == 300)
+}
+
+@Test func claudeDesktopUsageDropsWindowsThatHavePassed() throws {
+    let sampledAt = Date(timeIntervalSince1970: 1791449600)
+    let afterFiveHours = try #require(ClaudeDesktopUsageParser().parse(data: desktopHistory, now: sampledAt.addingTimeInterval(6 * 3600)))
+    #expect(afterFiveHours.usedPercent == nil)
+    #expect(afterFiveHours.weeklyPercent == 2)
+
+    #expect(ClaudeDesktopUsageParser().parse(data: desktopHistory, now: sampledAt.addingTimeInterval(8 * 86400)) == nil)
+    #expect(ClaudeDesktopUsageParser().parse(data: Data("{}".utf8)) == nil)
+}
+
+@Test func claudeUsageMergeFallsBackToNewerDesktopReading() throws {
+    let apiAt = Date(timeIntervalSince1970: 1791449600)
+    let api = try ClaudeUsageAPIParser().parse(data: usageResponse, fetchedAt: apiAt, generatedAt: apiAt)
+    let hook = UsageMetric(
+        provider: .claudeCode, usedPercent: 5, contextWindowPercent: 9,
+        dataSource: .officialQuota, measuredAt: apiAt.addingTimeInterval(-86400)
+    )
+    let desktop = UsageMetric(
+        provider: .claudeCode, usedPercent: 30, weeklyPercent: 12,
+        primaryWindowDurationMins: 300, secondaryWindowDurationMins: 10080,
+        dataSource: .officialQuota, measuredAt: apiAt.addingTimeInterval(3600)
+    )
+
+    let newer = ClaudeUsageAPIParser.merge(api: api, hook: hook, desktop: desktop)
+    #expect(newer.usedPercent == 30)
+    #expect(newer.weeklyPercent == 12)
+    #expect(newer.resetDate == nil)
+    #expect(newer.contextWindowPercent == 9)
+    #expect(newer.measuredAt == desktop.measuredAt)
+
+    let older = UsageMetric(provider: .claudeCode, usedPercent: 30, measuredAt: apiAt.addingTimeInterval(-60))
+    #expect(ClaudeUsageAPIParser.merge(api: api, hook: hook, desktop: older).usedPercent == 13)
+
+    let placeholder = UsageMetric(provider: .claudeCode, usedPercent: nil, note: "Claude status JSON 尚未可讀")
+    #expect(ClaudeUsageAPIParser.merge(api: nil, hook: placeholder, desktop: desktop).usedPercent == 30)
+}
+
 #if os(macOS)
 @Test func claudeUsagePollingFollowsLocalActivity() {
     var calendar = Calendar(identifier: .gregorian)

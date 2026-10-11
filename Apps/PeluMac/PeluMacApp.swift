@@ -274,6 +274,7 @@ final class UsageMonitor: @unchecked Sendable {
 
     private let claudeFilePath: URL
     private let claudeParser = ClaudeCodeParser()
+    private let claudeDesktopParser = ClaudeDesktopUsageParser()
     /// Primary Claude source; the statusLine hook only fires in terminal sessions.
     private let claudeUsageClient = ClaudeUsageAPIClient(
         clientVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
@@ -382,7 +383,15 @@ final class UsageMonitor: @unchecked Sendable {
                     note: "Claude status JSON 尚未可讀"
                 )
             }
-            let claudeMetric = ClaudeUsageAPIParser.merge(api: self.claudeUsageClient.latestMetric(), hook: hookMetric)
+            var claudeMetric = ClaudeUsageAPIParser.merge(
+                api: self.claudeUsageClient.latestMetric(),
+                hook: hookMetric,
+                desktop: self.claudeDesktopParser.read()
+            )
+            if self.claudeUsageClient.credentialState == .expired,
+               claudeMetric.measuredAt.map({ Date().timeIntervalSince($0) >= UsageMetric.staleAfter }) ?? true {
+                claudeMetric = claudeMetric.withNote("Claude Code 登入已過期，在終端機執行一次 claude 即可更新")
+            }
 
             // Prefer app-server quota while it is fresh. If RPC has been
             // stale for five minutes and JSONL has a newer observation, use

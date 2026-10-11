@@ -144,6 +144,25 @@ public struct UsageMetric: Codable, Equatable, Sendable, Identifiable {
         )
     }
 
+    public func withNote(_ note: String?) -> UsageMetric {
+        UsageMetric(
+            provider: provider,
+            usedPercent: usedPercent,
+            weeklyPercent: weeklyPercent,
+            primaryWindowDurationMins: primaryWindowDurationMins,
+            secondaryWindowDurationMins: secondaryWindowDurationMins,
+            contextWindowPercent: contextWindowPercent,
+            costTodayUSD: costTodayUSD,
+            resetDate: resetDate,
+            weeklyResetDate: weeklyResetDate,
+            status: status,
+            note: note,
+            dataSource: dataSource,
+            measuredAt: measuredAt,
+            tokenUsage: tokenUsage
+        )
+    }
+
     /// Old CloudKit payloads predate duration metadata. Their primary and
     /// secondary fields represented 5-hour and 7-day windows respectively.
     public var resolvedPrimaryWindowDurationMins: Int {

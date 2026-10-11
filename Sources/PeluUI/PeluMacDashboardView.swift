@@ -299,7 +299,8 @@ private struct MacQuotaCard: View {
                 .frame(maxWidth: .infinity)
             }
 
-            if let note = metric.note, metric.usedPercent == nil {
+            if let note = metric.note,
+               metric.usedPercent == nil || metric.measuredAt.map({ now.timeIntervalSince($0) >= UsageMetric.staleAfter }) == true {
                 Text(note)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
