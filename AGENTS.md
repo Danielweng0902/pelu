@@ -78,7 +78,7 @@ Bundle IDs        org.tobywu.pelu / org.tobywu.pelu.widget / org.tobywu.pelu.mac
 
 ## 6. 發版
 
-**目前線上**：PeluMac `1.0.11`（build 12，2026-10-09），下一版 build ≥ 13；iOS `1.1`（build 3，READY_FOR_SALE）；`1.2`（build 4，Cursor 用量、卡片 bars / rings）2026-10-11 已送審（WAITING_FOR_REVIEW，核准後自動上架），下一版 build ≥ 5。iOS 走 Xcode Archive → App Store Connect。
+**目前線上**：PeluMac `1.0.12`（build 13，2026-10-11，Cursor 用量），下一版 build ≥ 14；iOS `1.2`（build 4，READY_FOR_SALE），下一版 build ≥ 5。iOS 走 Xcode Archive → App Store Connect。
 
 iOS 版號用命令列帶入（`MARKETING_VERSION=… CURRENT_PROJECT_VERSION=…`），pbxproj 不動。`xcodebuild archive` / `-exportArchive`（ExportOptions `method=app-store-connect`、`destination=upload`）都加 `-allowProvisioningUpdates`，但**不要帶 `-authenticationKey*`**：那把 API key 沒有 cloud-managed distribution certificate 權限，會匯出失敗；不帶就改用 Xcode 裡登入的帳號雲端簽章，可以直接上傳。build、archive 路徑放在 iCloud 外。
 
@@ -102,6 +102,7 @@ PeluMac：
 ./scripts/release.sh <version> <build>      # build、重簽、notarize、staple、DMG、Sparkle 簽章，印出 appcast <item>
 gh release create v<version> dist/PeluMac.dmg --repo TobyWu666/pelu-releases --title "Pelu <version>" --notes "..."
 # 把 <item> 貼到 scripts/appcast.xml 最上方並 commit，再複製到 TobyWu666/pelu-web 的 appcast.xml 並 push
+# （不必 clone：兩邊內容相同時可用 gh api -X PUT repos/TobyWu666/pelu-web/contents/appcast.xml 帶 sha 直接覆蓋）
 ```
 
 前置：Keychain 有 Developer ID Application 憑證與 Sparkle 私鑰（首次用 `scripts/generate-sparkle-keys.sh` 產生，Keychain service `https://sparkle-project.org`；備份在 `.secrets/sparkle-ed25519-private-key.txt`，新 Mac 用 `generate_keys -f` 匯入，另有離線備份）、已安裝 Developer ID provisioning profile（`Pelu Mac Developer ID`，必須包含這台 Mac Keychain 裡那張 Developer ID 憑證，換 Mac 時在 developer.apple.com 編輯 profile 勾選憑證並重新下載）、`xcrun notarytool store-credentials pelu-notary`、`brew install create-dmg`。
@@ -111,6 +112,7 @@ gh release create v<version> dist/PeluMac.dmg --repo TobyWu666/pelu-releases --t
 - Sparkle nested binaries（Updater.app、Autoupdate、XPC）要 inside-out 重簽，否則 notarization 拒收。
 - 重簽主 app 要 `--preserve-metadata=identifier,entitlements,flags`，不能拿 source entitlements 覆寫，否則 CloudKit / App Group 失效。
 - DMG 背景用 multi-rep `scripts/dmg-background.tiff`，對應 750×500 視窗。
+- macOS 會清掉 `$TMPDIR` 裡放久的檔案：build 報 `Sparkle.xcframework` 找不到時，刪掉 `$TMPDIR/pelu-build-release/SourcePackages` 重跑。notarytool `connectTimeout` 多半是網路暫時不穩，重跑即可。
 
 發布後驗證：
 
