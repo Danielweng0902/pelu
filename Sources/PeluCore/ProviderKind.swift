@@ -4,6 +4,7 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
     case claudeCode = "claude_code"
     case codex
     case cursor
+    case grokBot = "grok_bot"
 
     public var id: String { rawValue }
 
@@ -15,6 +16,8 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
             "Codex"
         case .cursor:
             "Cursor"
+        case .grokBot:
+            "Grok Bot"
         }
     }
 
@@ -26,6 +29,8 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
             "Codex"
         case .cursor:
             "Cursor"
+        case .grokBot:
+            "Grok"
         }
     }
 
@@ -38,6 +43,8 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
             "X"
         case .cursor:
             "U"
+        case .grokBot:
+            "G"
         }
     }
 
@@ -49,6 +56,8 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
             "CodexIcon"
         case .cursor:
             "CursorIcon"
+        case .grokBot:
+            "GrokBotIcon"
         }
     }
 
@@ -57,5 +66,10 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
     /// Mac. Every other provider travels in `extraMetrics`.
     public var fitsLegacyPayload: Bool {
         self == .claudeCode || self == .codex
+    }
+
+    /// Grok Bot has a single weekly pool.
+    public var hasSecondaryWindow: Bool {
+        self != .grokBot
     }
 }

@@ -267,6 +267,9 @@ final class UsageMonitor: @unchecked Sendable {
     var showCursor: Bool {
         didSet { UserDefaults.standard.set(showCursor, forKey: "pelu.menubar.showCursor") }
     }
+    var showGrokBot: Bool {
+        didSet { UserDefaults.standard.set(showGrokBot, forKey: "pelu.menubar.showGrokBot") }
+    }
     /// "text" (C 37%) or "rings" (`MenuBarRings`).
     var menuBarStyle: String {
         didSet { UserDefaults.standard.set(menuBarStyle, forKey: "pelu.menubar.style") }
@@ -280,6 +283,9 @@ final class UsageMonitor: @unchecked Sendable {
         clientVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     )
     private let cursorClient = CursorUsageClient(
+        clientVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+    )
+    private let grokBotClient = GrokBotUsageClient(
         clientVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
     )
     private let codexReader = CodexJSONLReader()
@@ -317,6 +323,14 @@ final class UsageMonitor: @unchecked Sendable {
         showClaude = ud.object(forKey: "pelu.menubar.showClaude") as? Bool ?? true
         showCodex  = ud.object(forKey: "pelu.menubar.showCodex")  as? Bool ?? false
         showCursor = ud.object(forKey: "pelu.menubar.showCursor") as? Bool ?? false
+        showGrokBot = ud.object(forKey: "pelu.menubar.showGrokBot") as? Bool ?? false
+        // A panel list saved before Grok Bot existed can't have opted out of it.
+        if !ud.bool(forKey: "pelu.mac.panelProviders.grokBotAdded") {
+            if let saved = ud.string(forKey: "pelu.mac.panelProviders") {
+                ud.set(MacPanelProviders(rawValue: saved).setting(.grokBot, visible: true).rawValue, forKey: "pelu.mac.panelProviders")
+            }
+            ud.set(true, forKey: "pelu.mac.panelProviders.grokBotAdded")
+        }
         menuBarStyle = ud.string(forKey: "pelu.menubar.style") ?? "text"
 
         claudeFilePath = FileManager.default.homeDirectoryForCurrentUser
@@ -342,6 +356,9 @@ final class UsageMonitor: @unchecked Sendable {
             self?.refresh()
         }
         cursorClient.onUpdate = { [weak self] in
+            self?.refresh()
+        }
+        grokBotClient.onUpdate = { [weak self] in
             self?.refresh()
         }
 
@@ -429,6 +446,10 @@ final class UsageMonitor: @unchecked Sendable {
             if self.cursorClient.isAvailable {
                 self.cursorClient.refreshIfDue()
                 metrics.append(self.cursorClient.currentMetric())
+            }
+            if self.grokBotClient.isAvailable {
+                self.grokBotClient.refreshIfDue()
+                if let grokBot = self.grokBotClient.currentMetric() { metrics.append(grokBot) }
             }
             let snap = UsageSnapshot(
                 generatedAt: Date(),
@@ -724,7 +745,7 @@ struct PeluMacApp: App {
     }
 
     private var menuBarProviders: [ProviderKind] {
-        [(ProviderKind.claudeCode, monitor.showClaude), (.codex, monitor.showCodex), (.cursor, monitor.showCursor)]
+        [(ProviderKind.claudeCode, monitor.showClaude), (.codex, monitor.showCodex), (.cursor, monitor.showCursor), (.grokBot, monitor.showGrokBot)]
             .filter(\.1).map(\.0)
     }
 
@@ -764,7 +785,7 @@ struct PeluMacApp: App {
     }
 
     private func uploadSnapshotToCloud(_ snapshot: UsageSnapshot) {
-        // iOS 1.1 picks the newest Codex / Cursor reading across Macs, where a
+        // iOS 1.1 picks the newest Codex / Cursor / Grok Bot reading across Macs, where a
         // placeholder would beat another Mac's real one; only measured readings leave.
         let uploaded = UsageSnapshot(
             id: snapshot.id,

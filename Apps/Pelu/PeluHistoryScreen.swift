@@ -117,7 +117,7 @@ struct PeluHistoryScreen: View {
                     switch metric.provider {
                     case .claudeCode: claudeDay += delta
                     case .codex:      codexDay += delta
-                    case .cursor:     break
+                    case .cursor, .grokBot: break
                     }
                     prevByKey[key] = cur
                 }
@@ -169,7 +169,7 @@ struct PeluHistoryScreen: View {
         case .codex:
             guard let tokens = metric.tokenUsage else { return nil }
             return CodexPricing.estimateUSD(for: tokens)
-        case .cursor:
+        case .cursor, .grokBot:
             return nil
         }
     }

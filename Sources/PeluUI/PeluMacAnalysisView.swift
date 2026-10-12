@@ -44,7 +44,7 @@ public struct PeluMacAnalysisView: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .frame(width: providers.count > 2 ? 300 : 230)
+                    .frame(width: providers.count > 3 ? 380 : providers.count > 2 ? 300 : 230)
                 }
                 HStack(spacing: 16) {
                     summary("目前已用", value: PercentFormatter.string(from: secondary ? metric?.weeklyPercent : metric?.usedPercent))
@@ -63,11 +63,13 @@ public struct PeluMacAnalysisView: View {
                         .pickerStyle(.segmented)
                         .frame(width: 230)
                     }
-                    Picker("額度週期", selection: $secondary) {
-                        Text(windowPickerLabel(metric, secondary: false)).tag(false)
-                        Text(windowPickerLabel(metric, secondary: true)).tag(true)
+                    if provider.hasSecondaryWindow {
+                        Picker("額度週期", selection: $secondary) {
+                            Text(windowPickerLabel(metric, secondary: false)).tag(false)
+                            Text(windowPickerLabel(metric, secondary: true)).tag(true)
+                        }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
                     if points.isEmpty {
                         ContentUnavailableView("尚無歷史資料", systemImage: "chart.xyaxis.line", description: Text("Pelu 開啟後會自動記錄新測量。資料會保留在這台 Mac，最多 30 天。"))
                             .frame(height: 240)
@@ -148,6 +150,19 @@ public struct PeluMacAnalysisView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)
                     .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
+                } else if provider == .grokBot {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("每週額度").font(.headline)
+                        if let reset = metric?.resetDate {
+                            let start = reset.addingTimeInterval(-Double(metric?.resolvedPrimaryWindowDurationMins ?? 0) * 60)
+                            LabeledContent("本週", value: "\(start.formatted(date: .abbreviated, time: .shortened)) – \(reset.formatted(date: .abbreviated, time: .shortened))")
+                        }
+                        Text("Grok Bot 的用量每週重置，和 Cursor 的方案額度分開計算。Pelu 透過這台 Mac 上 Cursor 登入的帳號讀取。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
+                    .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("工作階段").font(.headline)
@@ -161,7 +176,10 @@ public struct PeluMacAnalysisView: View {
             }
             .padding(28)
         }
-        .onChange(of: provider) { _, _ in selectedDate = nil }
+        .onChange(of: provider) { _, newValue in
+            selectedDate = nil
+            if !newValue.hasSecondaryWindow { secondary = false }
+        }
         .onChange(of: days) { _, _ in selectedDate = nil }
         .onChange(of: secondary) { _, _ in selectedDate = nil }
     }

@@ -80,7 +80,7 @@ public final class CursorUsageClient: @unchecked Sendable {
     public typealias UpdateHandler = @Sendable () -> Void
 
     private static let endpoint = URL(string: "https://cursor.com/api/usage-summary")!
-    private static let databaseURL = FileManager.default.homeDirectoryForCurrentUser
+    static let databaseURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
     /// Spacing while Cursor is writing its state (the app is open and in use).
     static let activeInterval: TimeInterval = 300
@@ -207,6 +207,7 @@ public final class CursorUsageClient: @unchecked Sendable {
     }
 
     struct Token {
+        let jwt: String
         let cookie: String
         let expiresAt: Date?
     }
@@ -227,10 +228,10 @@ public final class CursorUsageClient: @unchecked Sendable {
         allowed.insert(charactersIn: "-._~")
         guard let value = "\(user)::\(jwt)".addingPercentEncoding(withAllowedCharacters: allowed) else { return nil }
         let expiresAt = (claims["exp"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue) }
-        return Token(cookie: "WorkosCursorSessionToken=\(value)", expiresAt: expiresAt)
+        return Token(jwt: jwt, cookie: "WorkosCursorSessionToken=\(value)", expiresAt: expiresAt)
     }
 
-    private static func readToken() -> Token? {
+    static func readToken() -> Token? {
         var db: OpaquePointer?
         guard sqlite3_open_v2(databaseURL.path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             sqlite3_close(db)

@@ -121,7 +121,7 @@ public struct PeluMacDashboardView: View {
         }
     }
 
-    /// Cursor only appears once the Mac has found a Cursor install; Claude and
+    /// Cursor and Grok Bot only appear once the Mac reports them; Claude and
     /// Codex keep a placeholder so a missing source reads as "no data".
     private var visibleMetrics: [UsageMetric] {
         let metrics = ProviderKind.allCases
@@ -519,6 +519,12 @@ private struct MenuBarGlass: NSViewRepresentable {
             provider: .cursor, usedPercent: 10, weeklyPercent: 1,
             primaryWindowDurationMins: 31 * 1440, secondaryWindowDurationMins: 31 * 1440,
             resetDate: cycleEnd, weeklyResetDate: cycleEnd,
+            dataSource: .officialQuota, measuredAt: now
+        ),
+        UsageMetric(
+            provider: .grokBot, usedPercent: 51,
+            primaryWindowDurationMins: 7 * 1440,
+            resetDate: now.addingTimeInterval(3 * 86400),
             dataSource: .officialQuota, measuredAt: now
         ),
     ]), refreshAction: {}, analysisAction: {})

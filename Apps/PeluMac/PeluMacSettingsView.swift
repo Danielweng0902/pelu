@@ -76,10 +76,11 @@ struct PeluMacSettingsView: View {
             panelProviderToggle("Claude Code", provider: .claudeCode)
             panelProviderToggle("Codex", provider: .codex)
             panelProviderToggle("Cursor", provider: .cursor)
+            panelProviderToggle("Grok Bot", provider: .grokBot)
         } header: {
             Text("面板顯示服務")
         } footer: {
-            Text("至少保留一個服務。顯示多個服務時，面板上方會列出各自用量，點選即可查看詳細配額。Cursor 需在這台 Mac 安裝並登入才會出現。")
+            Text("至少保留一個服務。顯示多個服務時，面板上方會列出各自用量，點選即可查看詳細配額。Cursor 需在這台 Mac 安裝並登入才會出現；Grok Bot 透過同一個 Cursor 帳號讀取，有用量或裝了 Grok Bot 才會出現。")
                 .font(.caption)
         }
     }
@@ -180,6 +181,7 @@ struct PeluMacSettingsView: View {
             Toggle("Claude（C）", isOn: $monitor.showClaude)
             Toggle("Codex（X）", isOn: $monitor.showCodex)
             Toggle("Cursor（U）", isOn: $monitor.showCursor)
+            Toggle("Grok Bot（G）", isOn: $monitor.showGrokBot)
         } header: {
             Text("選單列顯示")
         } footer: {
