@@ -125,7 +125,7 @@ private extension ProviderKind {
         case .claudeCode: "Claude"
         case .codex:      "Codex"
         case .cursor:     "Cursor"
-        case .grokBot:    "Grok"
+        case .grokBot:    "GrokBot"
         }
     }
 }

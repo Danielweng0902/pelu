@@ -30,7 +30,7 @@ public enum ProviderKind: String, Codable, Sendable, CaseIterable, Identifiable 
         case .cursor:
             "Cursor"
         case .grokBot:
-            "Grok"
+            "GrokBot"
         }
     }
 

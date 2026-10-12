@@ -70,9 +70,9 @@ public struct PeluMacDashboardView: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 if metrics.count > 1 {
-                    HStack(spacing: 8) {
+                    HStack(spacing: metrics.count > 3 ? 6 : 8) {
                         ForEach(metrics) { metric in
-                            MacProviderTile(metric: metric, isSelected: metric.provider == selected.provider) {
+                            MacProviderTile(metric: metric, isSelected: metric.provider == selected.provider, isCrowded: metrics.count > 3, now: context.date) {
                                 selectedProvider = metric.provider
                             }
                         }
@@ -170,6 +170,9 @@ private struct MacProviderTile: View {
     @State private var isHovered = false
     let metric: UsageMetric
     let isSelected: Bool
+    /// Four tiles leave no room for the status dot; the gauge already carries the status color.
+    var isCrowded = false
+    var now = Date()
     let action: () -> Void
 
     var body: some View {
@@ -183,8 +186,11 @@ private struct MacProviderTile: View {
                     Text(metric.provider.shortName)
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
-                    Spacer(minLength: 2)
-                    Circle().fill(metric.status.tintColor).frame(width: 5, height: 5)
+                        .minimumScaleFactor(0.85)
+                    if !isCrowded {
+                        Spacer(minLength: 2)
+                        Circle().fill(metric.status.tintColor).frame(width: 5, height: 5)
+                    }
                 }
                 Text(PercentFormatter.string(from: metric.usedPercent))
                     .font(.system(size: 21, weight: .semibold))
@@ -198,7 +204,7 @@ private struct MacProviderTile: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, isCrowded ? 8 : 10)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
@@ -222,7 +228,11 @@ private struct MacProviderTile: View {
         if let weekly = metric.weeklyPercent {
             return "\(metric.windowTitle(secondary: true, compact: true)) \(PercentFormatter.string(from: weekly))"
         }
-        return metric.usedPercent == nil ? "尚無資料" : metric.windowTitle(secondary: false, compact: true)
+        guard metric.usedPercent != nil else { return "尚無資料" }
+        if let reset = metric.resetDate, reset > now {
+            return ResetTimeFormatter.string(from: reset, now: now)
+        }
+        return metric.windowTitle(secondary: false, compact: true)
     }
 
     private var fill: Color {
