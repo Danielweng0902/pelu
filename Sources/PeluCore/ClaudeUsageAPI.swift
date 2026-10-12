@@ -105,8 +105,7 @@ public struct ClaudeUsageAPIParser: Sendable {
 ///
 /// Never refreshes the token itself: refresh tokens rotate, so doing it here
 /// could sign Claude Code out. An expired token just waits until Claude Code
-/// next runs and refreshes it. If the user denies the Keychain prompt we stop
-/// asking until the next launch.
+/// next runs and refreshes it.
 ///
 /// The endpoint rate-limits aggressively (30–60s polling gets stuck on 429 for
 /// hours, which also breaks Claude Code's own `/usage`), so polling follows
@@ -135,9 +134,16 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
     static let quietHours = 2..<8
     static let quietHoursFactor: Double = 2
     private static let backoffSeconds: [TimeInterval] = [300, 900, 1800, 3600]
-    /// Re-reading the Keychain can prompt, so wait longer for Claude Code
-    /// to refresh an expired token.
-    private static let expiredTokenRetry: TimeInterval = 300
+    /// Checking for Claude Code's refresh only reads the item's attributes.
+    private static let expiredTokenRetry: TimeInterval = 60
+    private static let deniedRetry: TimeInterval = 3600
+    /// `security` exits with the low byte of the OSStatus.
+    private static let securityNotFoundStatus: Int32 = 44  // errSecItemNotFound
+    private static let securityDeniedStatuses: Set<Int32> = [
+        128,  // errSecUserCanceled
+        51,   // errSecAuthFailed
+        36,   // errSecInteractionNotAllowed
+    ]
 
     private let queue = DispatchQueue(label: "org.tobywu.pelu.claude-usage", qos: .utility)
     private let userAgent: String
@@ -145,11 +151,14 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
 
     // Owned by `queue`, which may block on a Keychain prompt.
     private var token: (value: String, expiresAt: Date?)?
+    /// Item modification date when `token` was read; unchanged means
+    /// re-reading would return the same token.
+    private var tokenItemModifiedAt: Date?
     private var nextAttemptAt = Date.distantPast
     private var lastAttemptAt: Date?
     private var consecutiveFailures = 0
+    private var hasSucceeded = false
     private var isInFlight = false
-    private var keychainDenied = false
     /// Behind a lock rather than `queue` so readers never wait on a prompt.
     private let latestLock = NSLock()
     private var latest: (data: Data, fetchedAt: Date)?
@@ -177,7 +186,7 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
     /// Cheap to call on every refresh; fetches only when `isDue` says so.
     public func refreshIfDue() {
         queue.async { [weak self] in
-            guard let self, !self.keychainDenied, !self.isInFlight else { return }
+            guard let self, !self.isInFlight else { return }
             let now = Date()
             guard Self.isDue(
                 now: now,
@@ -186,7 +195,8 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
                 lastActivityAt: Self.latestTranscriptActivity()
             ) else { return }
             guard let token = self.currentToken() else {
-                self.nextAttemptAt = now.addingTimeInterval(Self.expiredTokenRetry)
+                let retry = self.credentialState == .denied ? Self.deniedRetry : Self.expiredTokenRetry
+                self.nextAttemptAt = now.addingTimeInterval(retry)
                 return
             }
             self.isInFlight = true
@@ -243,6 +253,10 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
                 if status == 200, let data,
                    (try? ClaudeUsageAPIParser().parse(data: data, fetchedAt: now, generatedAt: now)) != nil {
                     self.latestLock.withLock { self.latest = (data, now) }
+                    if !self.hasSucceeded || self.consecutiveFailures > 0 {
+                        NSLog("Pelu Claude usage API OK after \(self.consecutiveFailures) failure(s)")
+                    }
+                    self.hasSucceeded = true
                     self.consecutiveFailures = 0
                     self.nextAttemptAt = .distantPast
                     self.onUpdate?()
@@ -258,17 +272,29 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
         }.resume()
     }
 
-    /// Cached token while it is valid; otherwise re-read the Keychain, which
-    /// may show the system access prompt (hence its own queue).
+    /// Re-reads the token only when the Keychain item changed (Claude Code
+    /// rewrites it on refresh) or there is no usable cached one.
     private func currentToken() -> String? {
         let now = Date()
-        if let token, token.expiresAt.map({ $0 > now }) ?? true { return token.value }
-        token = readCredentials()
-        guard let token else {
-            setCredentialState(keychainDenied ? .denied : .missing)
-            return nil
+        let itemModifiedAt = Self.keychainItemModifiedAt()
+        let cachedExpired = token?.expiresAt.map { $0 <= now } ?? false
+        // Without a Keychain item (file fallback) there is no change signal.
+        if token == nil || itemModifiedAt != tokenItemModifiedAt || (cachedExpired && itemModifiedAt == nil) {
+            switch readCredentials() {
+            case .found(let credentials):
+                token = credentials
+                tokenItemModifiedAt = itemModifiedAt
+            case .missing:
+                token = nil
+                setCredentialState(.missing)
+                return nil
+            case .denied:
+                token = nil
+                setCredentialState(.denied)
+                return nil
+            }
         }
-        guard token.expiresAt.map({ $0 > now }) ?? true else {
+        guard let token, token.expiresAt.map({ $0 > now }) ?? true else {
             setCredentialState(.expired)
             return nil
         }
@@ -277,37 +303,105 @@ public final class ClaudeUsageAPIClient: @unchecked Sendable {
     }
 
     private func setCredentialState(_ state: CredentialState) {
-        latestLock.withLock { _credentialState = state }
+        let changed = latestLock.withLock {
+            defer { _credentialState = state }
+            return _credentialState != state
+        }
+        if changed { NSLog("Pelu Claude usage API: credentials \(state)") }
     }
 
-    private func readCredentials() -> (value: String, expiresAt: Date?)? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.keychainService,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        var data = item as? Data
-        switch status {
-        case errSecSuccess:
-            break
-        case errSecUserCanceled, errSecAuthFailed, errSecInteractionNotAllowed:
-            keychainDenied = true
-            NSLog("Pelu Claude usage API: Keychain access denied (\(status)); using statusLine hook only")
-            return nil
+    private enum CredentialRead {
+        case found((value: String, expiresAt: Date?))
+        case missing
+        case denied
+    }
+
+    /// Reads through `/usr/bin/security` rather than `SecItemCopyMatching`:
+    /// Claude Code writes the item with that tool, which keeps it trusted,
+    /// while every Claude Code rewrite drops Pelu's own access and makes
+    /// macOS ask for the login password again.
+    private func readCredentials() -> CredentialRead {
+        let result = Self.runSecurity(["find-generic-password", "-s", Self.keychainService, "-w"])
+        var data: Data?
+        switch result?.status {
+        case 0:
+            data = result?.output
+        case let status? where Self.securityDeniedStatuses.contains(status):
+            NSLog("Pelu Claude usage API: Keychain access denied (security exit \(status)), retry in \(Int(Self.deniedRetry))s")
+            return .denied
+        case nil:
+            NSLog("Pelu Claude usage API: security did not finish, retry in \(Int(Self.deniedRetry))s")
+            return .denied
         default:
+            if result?.status != Self.securityNotFoundStatus {
+                NSLog("Pelu Claude usage API: security exit \(result?.status ?? -1), trying credentials file")
+            }
             // Some installs keep credentials in a file instead of the Keychain.
             data = try? Data(contentsOf: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".claude/.credentials.json"))
         }
-        guard let data,
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let data, let credentials = Self.parseCredentials(data) else { return .missing }
+        return .found(credentials)
+    }
+
+    /// Accepts the credentials JSON, or its hex form (what `security -w`
+    /// prints for data that isn't plain text).
+    static func parseCredentials(_ data: Data) -> (value: String, expiresAt: Date?)? {
+        guard let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            return nil
+        }
+        let json = text.hasPrefix("{") ? Data(text.utf8) : hexDecoded(text)
+        guard let json,
+              let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any],
               let oauth = object["claudeAiOauth"] as? [String: Any],
               let value = oauth["accessToken"] as? String, !value.isEmpty else { return nil }
         let expiresAt = (oauth["expiresAt"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
         return (value, expiresAt)
+    }
+
+    private static func hexDecoded(_ text: String) -> Data? {
+        let bytes = Array(text.utf8)
+        guard !bytes.isEmpty, bytes.count.isMultiple(of: 2) else { return nil }
+        var data = Data(capacity: bytes.count / 2)
+        for index in stride(from: 0, to: bytes.count, by: 2) {
+            guard let byte = UInt8(String(decoding: bytes[index..<index + 2], as: UTF8.self), radix: 16) else { return nil }
+            data.append(byte)
+        }
+        return data
+    }
+
+    /// Attributes are readable without the item's ACL, so this never prompts.
+    private static func keychainItemModifiedAt() -> Date? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let attributes = item as? [String: Any] else { return nil }
+        return attributes[kSecAttrModificationDate as String] as? Date
+    }
+
+    /// Nil when it can't launch or is still running after `timeout` (an
+    /// unanswered prompt). The output is a few KB, well under the pipe buffer.
+    private static func runSecurity(_ arguments: [String], timeout: TimeInterval = 60) -> (status: Int32, output: Data)? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = arguments
+        let stdout = Pipe()
+        process.standardOutput = stdout
+        process.standardError = FileHandle.nullDevice
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+        do { try process.run() } catch { return nil }
+        guard finished.wait(timeout: .now() + timeout) == .success else {
+            process.terminate()
+            return nil
+        }
+        let output = stdout.fileHandleForReading.readDataToEndOfFile()
+        return (process.terminationStatus, output)
     }
 }
 #endif // os(macOS)

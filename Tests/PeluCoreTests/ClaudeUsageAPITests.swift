@@ -135,4 +135,17 @@ private let desktopHistory = """
     #expect(!due(night, 900, -1, 0, -10))            // quiet hours: 30 min when idle
     #expect(due(night, 1800, -1, 0, -10))
 }
+
+@Test func claudeCredentialsParseSecurityOutput() throws {
+    let json = #"{"claudeAiOauth":{"accessToken":"sk-test","expiresAt":1791449600000,"refreshToken":"r"}}"#
+    let plain = try #require(ClaudeUsageAPIClient.parseCredentials(Data((json + "\n").utf8)))
+    #expect(plain.value == "sk-test")
+    #expect(plain.expiresAt == Date(timeIntervalSince1970: 1791449600))
+
+    let hex = Data(json.utf8).map { String(format: "%02x", $0) }.joined()
+    #expect(ClaudeUsageAPIClient.parseCredentials(Data((hex + "\n").utf8))?.value == "sk-test")
+
+    #expect(ClaudeUsageAPIClient.parseCredentials(Data(#"{"claudeAiOauth":{"accessToken":""}}"#.utf8)) == nil)
+    #expect(ClaudeUsageAPIClient.parseCredentials(Data("abc".utf8)) == nil)
+}
 #endif
